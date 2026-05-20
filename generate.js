@@ -29,16 +29,40 @@ function extractMessages(filePath) {
   for (const line of lines) {
     try {
       const d = JSON.parse(line);
-      const role = d?.message?.role || "";
+
+      // Detect format and resolve role + content + timestamp
+      let role = "";
+      let content = null;
+      let ts = "";
+
+      // Claude Code format: {type, message: {role, content}, timestamp}
+      if (d.message && d.message.role) {
+        role = d.message.role;
+        content = d.message.content;
+        ts = d.timestamp || "";
+      }
+      // Codex format A: payload.message.role
+      else if (d.payload && d.payload.message && d.payload.message.role) {
+        role = d.payload.message.role;
+        content = d.payload.message.content;
+        ts = d.timestamp || "";
+      }
+      // Codex format B: payload IS the message (payload.role)
+      else if (d.payload && d.payload.role) {
+        role = d.payload.role;
+        content = d.payload.content;
+        ts = d.timestamp || "";
+      }
+
       if (role !== "user" && role !== "assistant") continue;
 
-      const ts = d.timestamp || "";
-      const content = d?.message?.content;
       let text = "";
 
       if (Array.isArray(content)) {
         for (const item of content) {
-          if (item?.type === "text") text += item.text + "\n";
+          // Claude Code: type="text", Codex: type="input_text"
+          const isText = item?.type === "text" || item?.type === "input_text";
+          if (isText) text += (item.text || item.content || "") + "\n";
           if (item?.type === "tool_result") {
             const tc = item.content;
             if (Array.isArray(tc)) {
@@ -53,6 +77,11 @@ function extractMessages(filePath) {
         }
       } else if (typeof content === "string") {
         text = content;
+      }
+
+      // Strip Codex-style timestamp prefix from user messages: "[2026-05-17 07:44]\n\n..."
+      if (role === "user") {
+        text = text.replace(/^\[[\d\-: ]+\]\s*\n+/g, "").trimStart();
       }
 
       if (!text.trim()) continue;
